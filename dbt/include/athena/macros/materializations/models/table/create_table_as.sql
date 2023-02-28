@@ -1,4 +1,5 @@
 {% macro athena__create_table_as(temporary, relation, sql) -%}
+  {%- set materialized = config.get('materialized', default='table') -%}
   {%- set external_location = config.get('external_location', default=none) -%}
   {%- set partitioned_by = config.get('partitioned_by', default=none) -%}
   {%- set bucketed_by = config.get('bucketed_by', default=none) -%}
@@ -14,6 +15,10 @@
   {%- set location_property = 'external_location' -%}
   {%- set partition_property = 'partitioned_by' -%}
   {%- set location = adapter.s3_table_location(s3_data_dir, s3_data_naming, relation.schema, relation.identifier, external_location, temporary) -%}
+
+  {%- if materialized == 'table_hive_ha' -%}
+    {%- set location = location.replace('__ha', '') -%}
+  {%- endif %}
 
   {%- if table_type == 'iceberg' -%}
     {%- set location_property = 'location' -%}
@@ -36,12 +41,9 @@
     {%- endif -%}
   {%- endif %}
 
-{%- if table_type != 'iceberg' -%}
-    {% do adapter.prune_s3_table_location(location) %}
-{%- endif -%}
+  {% do adapter.delete_from_s3(location) %}
 
-  create table
-    {{ relation }}
+  create table {{ relation }}
   with (
     table_type='{{ table_type }}',
     is_external={%- if table_type == 'iceberg' -%}false{%- else -%}true{%- endif %},

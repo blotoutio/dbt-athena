@@ -161,7 +161,7 @@ class MockAWSService:
                             "Type": "date",
                         },
                     ],
-                    "Location": f"s3://{BUCKET}/tables/{view_name}",
+                    "Location": "",
                 },
                 "TableType": "VIRTUAL_VIEW",
             },
@@ -196,7 +196,102 @@ class MockAWSService:
                         "Type": "date",
                     },
                 ],
-                "TableType": "Table",
+                "TableType": "table",
+                "Parameters": {
+                    "compressionType": "snappy",
+                    "classification": "parquet",
+                    "projection.enabled": "false",
+                    "typeOfData": "file",
+                },
+            },
+        )
+
+    def create_table_without_partitions(self, table_name: str):
+        glue = boto3.client("glue", region_name=AWS_REGION)
+        glue.create_table(
+            DatabaseName=DATABASE_NAME,
+            TableInput={
+                "Name": table_name,
+                "StorageDescriptor": {
+                    "Columns": [
+                        {
+                            "Name": "id",
+                            "Type": "string",
+                        },
+                        {
+                            "Name": "country",
+                            "Type": "string",
+                        },
+                        {
+                            "Name": "dt",
+                            "Type": "date",
+                        },
+                    ],
+                    "Location": f"s3://{BUCKET}/tables/{table_name}",
+                },
+                "PartitionKeys": [],
+                "TableType": "table",
+                "Parameters": {
+                    "compressionType": "snappy",
+                    "classification": "parquet",
+                    "projection.enabled": "false",
+                    "typeOfData": "file",
+                },
+            },
+        )
+
+    def create_iceberg_table(self, table_name: str):
+        glue = boto3.client("glue", region_name=AWS_REGION)
+        glue.create_table(
+            DatabaseName=DATABASE_NAME,
+            TableInput={
+                "Name": table_name,
+                "StorageDescriptor": {
+                    "Columns": [
+                        {
+                            "Name": "id",
+                            "Type": "string",
+                        },
+                        {
+                            "Name": "country",
+                            "Type": "string",
+                        },
+                        {
+                            "Name": "dt",
+                            "Type": "date",
+                        },
+                    ],
+                    "Location": f"s3://{BUCKET}/tables/data/{table_name}",
+                },
+                "PartitionKeys": [
+                    {
+                        "Name": "dt",
+                        "Type": "date",
+                    },
+                ],
+                "TableType": "EXTERNAL_TABLE",
+                "Parameters": {
+                    "metadata_location": f"s3://{BUCKET}/tables/metadata/{table_name}/123.json",
+                    "table_type": "iceberg",
+                },
+            },
+        )
+
+    def create_table_without_table_type(self, table_name: str):
+        glue = boto3.client("glue", region_name=AWS_REGION)
+        glue.create_table(
+            DatabaseName=DATABASE_NAME,
+            TableInput={
+                "Name": table_name,
+                "StorageDescriptor": {
+                    "Columns": [
+                        {
+                            "Name": "id",
+                            "Type": "string",
+                        },
+                    ],
+                    "Location": f"s3://{BUCKET}/tables/{table_name}",
+                },
             },
         )
 
@@ -235,3 +330,45 @@ class MockAWSService:
         glue.batch_create_partition(
             DatabaseName="test_dbt_athena", TableName=table_name, PartitionInputList=partition_input_list
         )
+
+    def add_partitions_to_table(self, database, table_name):
+        partition_input_list = [
+            {
+                "Values": [dt],
+                "StorageDescriptor": {
+                    "Columns": [
+                        {
+                            "Name": "id",
+                            "Type": "string",
+                        },
+                        {
+                            "Name": "country",
+                            "Type": "string",
+                        },
+                        {
+                            "Name": "dt",
+                            "Type": "date",
+                        },
+                    ],
+                    "Location": f"s3://{BUCKET}/tables/{table_name}/dt={dt}",
+                },
+                "Parameters": {"compressionType": "snappy", "classification": "parquet"},
+            }
+            for dt in ["2022-01-01", "2022-01-02", "2022-01-03"]
+        ]
+        glue = boto3.client("glue", region_name=AWS_REGION)
+        glue.batch_create_partition(
+            DatabaseName=database, TableName=table_name, PartitionInputList=partition_input_list
+        )
+
+    def add_table_version(self, database, table_name):
+        glue = boto3.client("glue", region_name=AWS_REGION)
+        table = glue.get_table(DatabaseName=database, Name=table_name).get("Table")
+        new_table_version = {
+            "Name": table_name,
+            "StorageDescriptor": table["StorageDescriptor"],
+            "PartitionKeys": table["PartitionKeys"],
+            "TableType": table["TableType"],
+            "Parameters": table["Parameters"],
+        }
+        glue.update_table(DatabaseName=database, TableInput=new_table_version)

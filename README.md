@@ -5,7 +5,7 @@
 
 # dbt-athena
 
-* Supports dbt version `1.3.*`
+* Supports dbt version `1.4.*`
 * Supports [Seeds][seeds]
 * Correctly detects views and their columns
 * Supports [table materialization][table]
@@ -19,6 +19,7 @@
   * On Hive tables :
     * Support two incremental update strategies: `insert_overwrite` and `append`
     * Does **not** support the use of `unique_key`
+* Supports [snapshots][snapshots]
 * Does not support [Python models][python-models]
 
 [seeds]: https://docs.getdbt.com/docs/building-a-dbt-project/seeds
@@ -26,6 +27,7 @@
 [table]: https://docs.getdbt.com/docs/build/materializations#table
 [python-models]: https://docs.getdbt.com/docs/build/python-models#configuring-python-models
 [athena-iceberg]: https://docs.aws.amazon.com/athena/latest/ug/querying-iceberg.html
+[snapshots]: https://docs.getdbt.com/docs/build/snapshots
 
 ### Installation
 
@@ -196,38 +198,74 @@ It is possible to use iceberg in an incremental fashion, specifically 2 strategi
 * `merge`: must be used in combination with `unique_key` and it's only available with Engine version 3.
    It performs an upsert, new record are added, and record already existing are updated
 
+#### High available table materialization
+The current implementation of the table materialization can lead to downtime, as target table is dropped and re-created.
+To have the less destructive behavior it's possible to use `table='table_hive_ha'` materialization.
+**table_hive_ha** leverage the table versions feature of glue catalog, creating a tmp table and swapping
+the target table to the location of the tmp table.
+This materialization is only available for `table_type=hive` and requires using unique locations.
 
-#### Unsupported functionality
+```
+{{ config(
+    materialized='table_hive_ha',
+    format='parquet',
+    partition_by=['status'],
+    s3_data_naming='table_unique'
+) }}
 
-Due to the nature of AWS Athena, not all core dbt functionality is supported.
-The following features of dbt are not implemented on Athena:
-* Snapshots
 
-#### Known issues
+select
+  'a' as user_id,
+  'pi' as user_name,
+  'active' as status
+union all
+select
+  'b' as user_id,
+  'sh' as user_name,
+  'disabled' as status
+```
+
+By default, the materialization keeps the last 4 table versions, you can change it that setting `versions_to_keep`.
+
+##### Known issues
+* When swapping from a table with partitions to a table without (and the other way around), there could be a little downtime.
+  In case high performances are needed consider bucketing instead of partitions
+* By default, Glue "duplicate" the versions internally, so the last 2 versions of a table point to the same location
+* It's recommended to have versions_to_keep>= 4, as this will avoid to have the older location removed
+
+
+### Snapshots
+
+The adapter supports snapshot materialization. It supports both timestamp and check strategy. To create a snapshot create a snapshot file in the snapshots directory. If directory does not exist create one.
+
+#### Timestamp strategy
+
+To use the timestamp strategy refer to the [dbt docs](https://docs.getdbt.com/docs/build/snapshots#timestamp-strategy-recommended)
+
+#### Check strategy
+
+To use the check strategy refer to the [dbt docs](https://docs.getdbt.com/docs/build/snapshots#check-strategy)
+
+#### Hard-deletes
+
+The materialization also supports invalidating hard deletes. Check the [docs](https://docs.getdbt.com/docs/build/snapshots#hard-deletes-opt-in) to understand usage.
+
+
+### Known issues
 
 * Incremental Iceberg models - Sync all columns on schema change can't remove columns used as partitioning.
 The only way, from a dbt perspective, is to do a full-refresh of the incremental model.
 
-* Quoting is not currently supported
-  * If you need to quote your sources, escape the quote characters in your source definitions:
-
-  ```yaml
-  version: 2
-
-  sources:
-    - name: my_source
-      tables:
-        - name: first_table
-          identifier: "first table"       # Not like that
-        - name: second_table
-          identifier: "\"second table\""  # Like this
-  ```
-
 * Tables, schemas and database should only be lowercase
+
+* In order to avoid potential conflicts, make sure [`dbt-athena-adapter`](https://github.com/Tomme/dbt-athena) is not installed in the target environment.
+  See https://github.com/dbt-athena/dbt-athena/issues/103 for more details.
+
+* Snapshot does not support dropping columns from the source table. If you drop a column make sure to drop the column from the snapshot as well. Another workaround is to NULL the column in the snapshot definition to preserve history
 
 ### Contributing
 
-This connector works with Python from 3.7 to 3.10.
+This connector works with Python from 3.7 to 3.11.
 
 #### Getting started
 
